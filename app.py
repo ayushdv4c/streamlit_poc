@@ -1,16 +1,3 @@
-"""
-Streamlit two-page app:
-- Page 1: collect user input and call Databricks pipeline (simulated)
-- Page 2: preview generated email, optionally edit, and send with attachments
-
-Best practices:
-- Use environment variables / Streamlit secrets for credentials
-- Validate inputs
-- Keep attachments in memory (BytesIO)
-- Use TLS for SMTP
-- Clear logging and error handling
-"""
-
 import os
 import io
 import logging
@@ -35,7 +22,7 @@ SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 
-# Placeholder for SIMO Logo - Replace this URL or path with your actual image file
+# SIMO Logo
 LOGO_URL = os.path.join("utilities", "title.png")
 S_LOGO_URL = os.path.join("utilities", "logo.png")
 # Helper to convert local image to data URI so browser can render it
@@ -174,7 +161,7 @@ def send_email_via_smtp(email_obj: GeneratedEmail, override_body: str = None) ->
 def inject_custom_css():
     st.markdown("""
     <style>
-        /* Import Montserrat Font (matches SIMO/Solis typography) */
+        /* Import Montserrat Font */
         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap');
 
         /* --- GLOBAL VARIABLES & RESET --- */
@@ -183,7 +170,7 @@ def inject_custom_css():
             --primary-orange-hover: #E04F00;
             --text-dark: #1C1C1E;
             --text-gray: #555555;
-            --bg-light: #F9FAFB;
+            --bg-light: #fdf9f7; /* CHANGED: Beige background for main pages */
             --card-white: #FFFFFF;
             --border-color: #E5E7EB;
         }
@@ -197,7 +184,8 @@ def inject_custom_css():
         header[data-testid="stHeader"] { 
             background-color: transparent !important; 
         }
-        header[data-testid="stHeader"] > div:first-child {
+        /* Hiding specific decoration elements but ensuring controls aren't accidentally removed */
+        header[data-testid="stHeader"] > div[data-testid="stDecoration"] {
             display: none;
         }
         footer { display: none; }
@@ -277,12 +265,18 @@ def inject_custom_css():
 
         /* 5. SIDEBAR */
         [data-testid="stSidebar"] {
-            background-color: #FFFFFF;
+            background-color: #555759; /* CHANGED: Dark grey background */
             border-right: 1px solid var(--border-color);
         }
+        
+        /* Ensure text is white on the dark sidebar background */
+        [data-testid="stSidebar"] * {
+            color: #FFFFFF;
+        }
+
         [data-testid="stSidebar"] h3 {
             font-weight: 700;
-            color: var(--primary-orange);
+            color: var(--primary-orange) !important;
         }
         
         /* 6. TYPOGRAPHY & HEADERS */
@@ -291,11 +285,35 @@ def inject_custom_css():
             letter-spacing: -0.5px;
         }
         
+        /* 7. SIDEBAR COLLAPSED CONTROL FIX */
+        /* Forces the "expand sidebar" arrow (> icon) to be visible on the beige background */
+        [data-testid="stSidebarCollapsedControl"] {
+            display: block !important;
+            z-index: 1000000 !important;
+            background-color: transparent !important;
+        }
+        
+        /* Force the icon to be Dark Grey/Black so it contrasts with the Beige background when collapsed */
+        [data-testid="stSidebarCollapsedControl"] svg, 
+        [data-testid="stSidebarCollapsedControl"] i {
+            color: #1C1C1E !important;
+            fill: #1C1C1E !important;
+            stroke: #1C1C1E !important;
+        }
+
+        /* Ensure buttons INSIDE the sidebar (when expanded) remain white on the dark background */
+        [data-testid="stSidebar"] button[kind="secondary"] {
+             color: #FFFFFF !important;
+        }
+        [data-testid="stSidebar"] button[kind="secondary"] svg {
+             fill: #FFFFFF !important;
+        }
+
         /* LOGIN PAGE SPECIFIC */
         .login-header {
             font-size: 28px;
             font-weight: 800;
-            color: var(--text-dark);
+            color: #334355;
             text-align: center;
             margin-bottom: 25px;
             letter-spacing: -0.5px;
@@ -474,7 +492,7 @@ def page_dashboard():
     # 2. Metadata Section
     col_h1, col_h2 = st.columns([4, 1])
     with col_h1:
-        st.markdown('<h3 style="margin:0; padding:0; font-size:18px; color:#1C1C1E;">Details</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 style="margin:0; padding:0; font-size:18px; color:#334355;">Details</h3>', unsafe_allow_html=True)
     with col_h2:
         is_editing = st.checkbox("Edit Response", value=False)
     
@@ -501,7 +519,7 @@ def page_dashboard():
     st.markdown("<br>", unsafe_allow_html=True)
 
     # 3. Message Content
-    st.markdown("<strong style='color:#1C1C1E;'>Response</strong>", unsafe_allow_html=True)
+    st.markdown("<strong style='color:#334355;'>Response</strong>", unsafe_allow_html=True)
     
     if is_editing:
         st.session_state.editable_body = st.text_area("Body", value=st.session_state.editable_body, height=500, label_visibility="collapsed")
@@ -511,7 +529,7 @@ def page_dashboard():
     st.markdown("<br><hr style='margin: 30px 0; border-top: 1px solid #E5E7EB;'><br>", unsafe_allow_html=True)
 
     # 4. Attachments Section
-    st.markdown("<h3 style='margin:0; padding:0; font-size:18px; color:#1C1C1E;'>Attachments</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='margin:0; padding:0; font-size:18px; color:#334355;'>Attachments</h3>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     
     current_attachments = st.session_state.attachments
