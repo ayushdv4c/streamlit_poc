@@ -98,6 +98,9 @@ def inject_custom_css():
         header[data-testid="stHeader"] { background-color: transparent !important; }
         header[data-testid="stHeader"] > div[data-testid="stDecoration"] { display: none; }
         footer { display: none; }
+        
+        /* HIDE "Press Enter to submit" INSTRUCTIONS */
+        div[data-testid="InputInstructions"] { display: none !important; }
 
         /* Main Background */
         div[data-testid="stAppViewContainer"] {
@@ -170,8 +173,6 @@ def inject_custom_css():
         }
         
         div[role="radiogroup"] > label {
-            /* flex: 1 1 auto allows the tab to grow based on text size, 
-               fixing the 'not fitting' issue */
             flex: 1 1 auto; 
             min-width: 0;
             background-color: transparent;
@@ -187,18 +188,19 @@ def inject_custom_css():
         /* The Tab Box itself */
         div[role="radiogroup"] > label > div:last-child {
             text-align: center;
-            /* Adjusted padding to fit text comfortably */
             padding: 12px 10px; 
             font-weight: 600;
-            font-size: 13px; /* Slightly smaller to ensure single line fit */
+            font-size: 13px;
             color: var(--text-gray);
             border: 1px solid #E5E7EB;
             border-radius: 8px;
             background-color: #FAFAFA;
             transition: all 0.2s;
             display: block;
-            width: auto; /* Let content dictate width */
+            width: auto;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         /* Selected Tab Style */
