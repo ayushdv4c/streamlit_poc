@@ -4,9 +4,12 @@ import logging
 import random
 import base64
 import time
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass
 
 import streamlit as st
+import extract_msg  # pip install extract-msg
 
 # ---------- Configuration & Logging ----------
 logging.basicConfig(level=logging.INFO)
@@ -16,7 +19,8 @@ logger = logging.getLogger(__name__)
 LOGO_URL = os.path.join("utilities", "title.png")
 S_LOGO_URL = os.path.join("utilities", "logo.png")
 
-# Helper to convert local image to data URI
+# ---------- Helper Functions ----------
+
 def get_image_data_uri(path: str) -> str:
     try:
         base_dir = os.path.dirname(__file__) if "__file__" in globals() else os.getcwd()
@@ -42,6 +46,69 @@ def get_image_data_uri(path: str) -> str:
         return ""
 
 LOGO_DATA_URI = get_image_data_uri(LOGO_URL)
+
+def clean_header_text(text: str) -> str:
+    if not text:
+        return ""
+    clean = text.replace('\x00', '').replace('\ufffd', '')
+    return clean.strip()
+
+def strip_html_tags(html_content: str) -> str:
+    if not html_content:
+        return ""
+    clean = re.sub(r'<(style|script)[^>]*>.*?</\1>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+    clean = re.sub(r'<[^>]+>', '', clean)
+    clean = clean.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    clean = re.sub(r'\n\s*\n', '\n\n', clean) 
+    return clean.strip()
+
+@dataclass
+class ParsedEmailData:
+    sender: str
+    subject: str
+    body: str
+    date: str
+
+def parse_msg_file_to_dict(uploaded_file) -> ParsedEmailData:
+    """
+    Parses a .msg file and returns a simplified data structure for the dashboard.
+    """
+    try:
+        msg = extract_msg.openMsg(uploaded_file)
+        
+        # Extract Headers
+        raw_subject = msg.subject if msg.subject else "No Subject"
+        subject = clean_header_text(raw_subject)
+        
+        # Try to get sender
+        sender = "Unknown Sender"
+        if msg.sender:
+            sender = clean_header_text(msg.sender)
+        
+        # Extract Date
+        date_str = "Today"
+        if msg.date:
+            date_str = str(msg.date)
+
+        # Extract Body
+        body = ""
+        if msg.htmlBody:
+            try:
+                html_content = msg.htmlBody
+                if isinstance(html_content, bytes):
+                    html_content = html_content.decode('utf-8', errors='ignore')
+                body = strip_html_tags(html_content)
+            except Exception:
+                body = clean_header_text(msg.body) if msg.body else ""
+        elif msg.body:
+            body = clean_header_text(msg.body)
+        
+        msg.close()
+        return ParsedEmailData(sender=sender, subject=subject, body=body, date=date_str)
+        
+    except Exception as e:
+        logger.error(f"Error parsing MSG file: {e}")
+        return ParsedEmailData(sender="error@parsing.com", subject="Error Parsing File", body=f"Details: {e}", date="Now")
 
 # ---------- Mock Data Generators ----------
 def get_demo_emails():
@@ -87,6 +154,8 @@ def inject_custom_css():
             --bg-light: #fdf9f7;
             --card-white: #FFFFFF;
             --border-color: #E5E7EB;
+            --tabs-shift: -20px;
+            --tabs-max-width: 980px;
         }
 
         html, body, [class*="css"] {
@@ -98,8 +167,6 @@ def inject_custom_css():
         header[data-testid="stHeader"] { background-color: transparent !important; }
         header[data-testid="stHeader"] > div[data-testid="stDecoration"] { display: none; }
         footer { display: none; }
-        
-        /* HIDE "Press Enter to submit" INSTRUCTIONS */
         div[data-testid="InputInstructions"] { display: none !important; }
 
         /* Main Background */
@@ -107,22 +174,23 @@ def inject_custom_css():
             background-color: var(--bg-light);
         }
 
-        /* --- CARD STYLING --- */
+        /* Main Block Container */
         div[data-testid="block-container"] {
             background-color: var(--card-white);
             border-radius: 16px;
             border: 2px solid #D1D5DB; 
             box-shadow: 0 10px 40px rgba(0,0,0,0.1);
             padding: 2rem 3rem !important;
-            max-width: 1300px; 
-            margin-top: 2rem;
+            max-width: none !important;
+            width: calc(100% - 40px) !important;
+            margin: 1rem auto !important;
+            box-sizing: border-box;
         }
 
         /* Inputs */
         div[data-baseweb="input"] {
             background-color: #F3F4F6 !important;
             border-radius: 50px !important;
-            border: 1px solid transparent;
         }
         div[data-baseweb="input"]:focus-within {
             background-color: #FFFFFF !important;
@@ -134,61 +202,83 @@ def inject_custom_css():
              border-radius: 12px !important;
         }
 
-        /* Buttons */
+        /* --- BUTTON STYLING --- */
+        
+        /* 1. Reset standard button behavior for Streamlit to allow full control */
+        .stButton button {
+            transition: all 0.3s ease;
+        }
+
+        /* 2. Specific styles for Primary Buttons (Actions) - Keep these centered or standard */
         button[kind="primary"] {
             background-color: var(--primary-orange) !important;
             color: white !important;
             border: none;
             border-radius: 50px;
-            text-transform: uppercase;
             font-weight: 700;
-            transition: all 0.3s ease;
+            text-transform: none !important;
         }
         button[kind="primary"]:hover {
             background-color: var(--primary-orange-hover) !important;
-            box-shadow: 0 6px 16px rgba(255, 95, 0, 0.35);
-            transform: translateY(-2px);
         }
+
+        /* 3. Specific styles for Secondary Buttons (LIST ITEMS) - FORCE LEFT ALIGNMENT */
+        /* This selector targets the buttons used in the list view (default/secondary type) */
         button[kind="secondary"] {
             background-color: transparent !important;
             color: var(--text-gray) !important;
             border: 1px solid #E5E7EB !important;
-            border-radius: 50px;
+            border-radius: 8px; /* Square edges for list look */
+            text-transform: none !important;
+            
+            /* FORCE FLEX START ALIGNMENT */
+            display: flex !important;
+            justify-content: flex-start !important;
+            align-items: center !important;
+            text-align: left !important;
+            padding-left: 15px !important;
+            width: 100% !important;
         }
+
+        /* Ensure text inside secondary buttons aligns left */
+        button[kind="secondary"] p {
+            text-align: left !important;
+            margin: 0 !important;
+            width: 100% !important;
+            display: block !important;
+        }
+        
+        /* Ensure inner containers of secondary buttons align left */
+        button[kind="secondary"] > div {
+             justify-content: flex-start !important;
+             text-align: left !important;
+        }
+
         button[kind="secondary"]:hover {
             border-color: var(--primary-orange) !important;
             color: var(--primary-orange) !important;
+            background-color: #FFF5F0 !important;
         }
 
-        /* --- FIXED TAB NAVIGATION STYLING --- */
+        /* --- TAB NAVIGATION --- */
         div[role="radiogroup"] {
             display: flex;
-            flex-direction: row;
-            justify-content: space-between; 
-            align-items: center;
-            gap: 10px; 
+            justify-content: center;
             width: 100%;
             margin-bottom: 20px;
-            overflow: visible; 
+            overflow: visible !important;
         }
-        
-        div[role="radiogroup"] > label {
-            flex: 1 1 auto; 
-            min-width: 0;
-            background-color: transparent;
-            border: none;
-            margin: 0;
-            padding: 0;
+        div[role="radiogroup"] > div {
+            display: flex;
+            gap: 10px;
+            transform: translateX(var(--tabs-shift));
+            max-width: var(--tabs-max-width);
+            width: 100%;
+            justify-content: center;
         }
-        
-        div[role="radiogroup"] > label > div:first-child {
-            display: none; /* Hide Radio Circle */
-        }
-        
-        /* The Tab Box itself */
+        div[role="radiogroup"] > label > div:first-child { display: none; }
         div[role="radiogroup"] > label > div:last-child {
-            text-align: center;
-            padding: 12px 10px; 
+            padding: 12px 20px;
             font-weight: 600;
             font-size: 13px;
             color: var(--text-gray);
@@ -196,52 +286,27 @@ def inject_custom_css():
             border-radius: 8px;
             background-color: #FAFAFA;
             transition: all 0.2s;
-            display: block;
-            width: auto;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
-
-        /* Selected Tab Style */
         div[role="radiogroup"] > label[data-checked="true"] > div:last-child {
             color: #FFFFFF;
             background-color: var(--primary-orange);
             border-color: var(--primary-orange);
-            box-shadow: 0 4px 6px rgba(255, 95, 0, 0.2);
-        }
-
-        div[role="radiogroup"] > label:hover > div:last-child {
-            border-color: var(--primary-orange);
-            color: var(--primary-orange);
         }
         
-        div[role="radiogroup"] > label[data-checked="true"]:hover > div:last-child {
-            color: #FFFFFF;
+        /* Content Box */
+        .content-box {
+            background-color: #F9FAFB; 
+            border: 1px solid #E5E7EB; 
+            border-radius: 12px; 
+            padding: 25px; 
+            margin-bottom: 20px;
+            text-align: left !important;
+        }
+        .content-box * {
+            text-align: left !important;
         }
 
-        /* Email List Item Styling */
-        div.row-widget.stButton > button {
-            text-align: left;
-            border: 1px solid #eee;
-            background-color: #fff;
-            color: #333;
-            border-radius: 8px;
-            padding: 15px;
-            width: 100%;
-        }
-        div.row-widget.stButton > button:hover {
-            border-color: var(--primary-orange);
-            color: var(--primary-orange);
-            background-color: #FFF5F0;
-        }
-        div.row-widget.stButton > button:focus {
-            box-shadow: none;
-            border-color: var(--primary-orange);
-            background-color: #FFF5F0;
-        }
-
-        /* Login Specific */
+        /* Login Styling */
         .login-header {
             font-size: 28px;
             font-weight: 800;
@@ -257,17 +322,17 @@ def inject_custom_css():
             font-weight: 600;
             cursor: pointer;
         }
-        
-        /* Content Box Style */
-        .content-box {
-            background-color: #F9FAFB; 
-            border: 1px solid #E5E7EB; 
-            border-radius: 12px; 
-            padding: 25px; 
-            margin-bottom: 20px;
+
+        /* Upload Styling */
+        [data-testid="stFileUploader"] {
+            padding: 2rem;
+            border: 1px dashed var(--border-color);
+            border-radius: 12px;
+            background-color: #F9FAFB;
         }
     </style>
     """, unsafe_allow_html=True)
+
 
 # ---------- State Management ----------
 def init_state(key, value):
@@ -333,14 +398,72 @@ def page_login():
             if (username_input == DUMMY_USER or "demo" in username_input) and (password_input == DUMMY_PASS or password_input == "demo"):
                 st.session_state.authenticated = True
                 st.session_state.username = f"{DUMMY_USER}"
-                go_to("dashboard")
+                go_to("upload")
                 st.rerun()
             else:
                 st.error("Invalid credentials.")
         
         st.markdown('<div style="text-align:center; margin-top:25px; font-size:14px; color:#555;">New to SIMO? <a href="#" style="color:#FF5F00;font-weight:700;text-decoration:none;">Sign up</a></div>', unsafe_allow_html=True)
 
-# ---------- Page 2: Dashboard ----------
+# ---------- Page 2: Upload Client Request ----------
+def page_upload():
+    if not st.session_state.authenticated:
+        go_to("login")
+        st.rerun()
+        return
+
+    # Sidebar
+    with st.sidebar:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(f"### Hi, {st.session_state.username}")
+        st.markdown("_Ready to process new requests?_")
+        st.markdown("<br>" * 15, unsafe_allow_html=True)
+        if st.button("Log Out", type="primary"):
+            st.session_state.authenticated = False
+            go_to("login")
+            st.rerun()
+
+    # Header Logo
+    logo_img_tag = f'<img src="{LOGO_DATA_URI}" alt="SIMO Logo" style="height: 40px; object-fit: contain;">' if LOGO_DATA_URI else ''
+    st.markdown(f"""<div style="display:flex; justify-content:flex-end; align-items:center; padding-bottom:15px; margin-bottom:10px;">{logo_img_tag}</div>""", unsafe_allow_html=True)
+
+    # Content
+    st.markdown('<h2 style="text-align:center;">Upload Client Request</h2>', unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center; color:#666; font-size:14px; margin-bottom:30px;'>Upload a .msg file to populate the workflow.</div>", unsafe_allow_html=True)
+    
+    uploaded_msg = st.file_uploader("Upload .msg file", type=["msg"], label_visibility="collapsed")
+
+    col_btn_1, col_btn_2, col_btn_3 = st.columns([1, 2, 1])
+    
+    with col_btn_2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if uploaded_msg:
+            try:
+                with st.spinner("Processing file..."):
+                    parsed_data = parse_msg_file_to_dict(uploaded_msg)
+                    
+                    new_email_entry = {
+                        "id": random.randint(10000, 99999),
+                        "sender": parsed_data.sender,
+                        "subject": parsed_data.subject,
+                        "date": parsed_data.date,
+                        "body": parsed_data.body
+                    }
+                    
+                    st.session_state.emails.insert(0, new_email_entry)
+                    st.success("File processed successfully!")
+                    time.sleep(1)
+                    go_to("dashboard")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Failed to parse file: {e}")
+        else:
+            st.markdown("<div style='text-align:center; margin-top:10px;'>or</div>", unsafe_allow_html=True)
+            if st.button("Go to Dashboard without uploading", type="secondary", use_container_width=True):
+                go_to("dashboard")
+                st.rerun()
+
+# ---------- Page 3: Dashboard ----------
 def page_dashboard():
     if not st.session_state.authenticated:
         go_to("login")
@@ -358,6 +481,11 @@ def page_dashboard():
             init_state("active_tab_index", 0)
             go_to("login")
             st.rerun()
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("⬆ Upload New File", type="secondary"):
+            go_to("upload")
+            st.rerun()
 
     # Header Logo
     logo_img_tag = f'<img src="{LOGO_DATA_URI}" alt="SIMO Logo" style="height: 40px; object-fit: contain;">' if LOGO_DATA_URI else ''
@@ -370,7 +498,7 @@ def page_dashboard():
     c4 = len(st.session_state.responses_updated)
     c5 = len(st.session_state.responses_sent)
 
-    # 2. NAVIGATION (Flexible sizing)
+    # 2. NAVIGATION
     tab_options = [
         f"New Emails ({c1})", 
         f"Generated Responses ({c2})", 
@@ -401,6 +529,7 @@ def page_dashboard():
         else:
             for email in st.session_state.emails:
                 lbl = f"✉️ {email['sender']} | {email['subject']}"
+                # List items are secondary buttons by default
                 if st.button(lbl, key=f"t1_btn_{email['id']}", use_container_width=True):
                     st.session_state.sel_email_id = email['id']
                     st.session_state.response_generated_flag = False
@@ -420,15 +549,15 @@ def page_dashboard():
                         <div style="white-space: pre-wrap;">{sel_email['body']}</div>
                     </div>""", unsafe_allow_html=True)
 
-                    col_btn_l, col_btn_r = st.columns([1, 2])
-                    with col_btn_l:
-                        if st.button("✨ Generate Response", type="primary", key="t1_gen_btn"):
+                    c_left, c_center, c_right = st.columns([1, 2, 1])
+                    with c_center:
+                        if st.button("✨ Generate Response", type="primary", key="t1_gen_btn", use_container_width=True):
                             new_resp = {
                                 "id": random.randint(1000, 9999),
                                 "linked_email_id": sel_email['id'],
                                 "recipient": sel_email['sender'],
                                 "subject": f"Re: {sel_email['subject']}",
-                                "body": f"Hi {sel_email['sender'].split('@')[0]},\n\nThank you for your email regarding '{sel_email['subject']}'.\n\nWe are looking into it and will get back to you shortly.\n\nBest,\nSIMO Team"
+                                "body": f"Hi {sel_email['sender'].split('@')[0] if '@' in sel_email['sender'] else 'There'},\n\nThank you for your email regarding '{sel_email['subject']}'.\n\nWe are looking into it and will get back to you shortly.\n\nBest,\nSIMO Team"
                             }
                             st.session_state.responses_generated.insert(0, new_resp)
                             st.session_state.response_generated_flag = True
@@ -465,11 +594,14 @@ def page_dashboard():
                     c_h1, c_h2 = st.columns([4, 1])
                     with c_h1: st.markdown(f"### Reviewing: {curr['subject']}")
                     with c_h2: 
+                        # EDIT LOGIC
                         is_editing = st.checkbox("Edit Response", value=st.session_state.edit_mode_response, key="t2_edit_chk")
                         st.session_state.edit_mode_response = is_editing
 
                     if st.session_state.edit_mode_response:
-                        st.session_state.temp_response_body = st.text_area("Body", value=curr['body'], height=250, label_visibility="collapsed")
+                        # Capture input
+                        edited_body = st.text_area("Body", value=curr['body'], height=250, label_visibility="collapsed")
+                        st.session_state.temp_response_body = edited_body
                     else:
                         st.markdown(f"""
                         <div class="content-box">
@@ -478,15 +610,17 @@ def page_dashboard():
                         </div>""", unsafe_allow_html=True)
                         st.session_state.temp_response_body = curr['body']
 
-                    c_act1, c_act2, spacer = st.columns([1, 1, 2])
-                    with c_act1:
-                        if st.button("Accept", type="primary", key="t2_accept"):
+                    c_spacer_l, c_accept, c_update, c_spacer_r = st.columns([2, 2, 2, 2])
+                    
+                    with c_accept:
+                        if st.button("Accept", type="primary", key="t2_accept", use_container_width=True):
                             st.session_state.responses_approved.insert(0, curr)
                             st.session_state.responses_generated.pop(idx)
                             st.session_state.sel_gen_id = None
                             st.rerun()
-                    with c_act2:
-                        if st.button("Update", type="secondary", key="t2_update"):
+                    with c_update:
+                        if st.button("Update", type="secondary", key="t2_update", use_container_width=True):
+                            # Save the edited body to the Updated list
                             curr['body'] = st.session_state.temp_response_body
                             st.session_state.responses_updated.insert(0, curr)
                             st.session_state.responses_generated.pop(idx)
@@ -520,9 +654,9 @@ def page_dashboard():
                         <div style="white-space: pre-wrap;">{curr['body']}</div>
                     </div>""", unsafe_allow_html=True)
 
-                    c_send_l, c_send_r = st.columns([1, 2])
-                    with c_send_l:
-                        if st.button("Send Email", type="primary", key="t3_send"):
+                    c_left, c_center, c_right = st.columns([1, 2, 1])
+                    with c_center:
+                        if st.button("Send Email", type="primary", key="t3_send", use_container_width=True):
                             with st.spinner("Sending..."): time.sleep(0.5)
                             st.session_state.responses_sent.insert(0, curr)
                             st.session_state.responses_approved.pop(idx)
@@ -557,7 +691,7 @@ def page_dashboard():
                         <div style="white-space: pre-wrap;">{curr['body']}</div>
                     </div>""", unsafe_allow_html=True)
 
-                    c_s1, c_s2, c_s3 = st.columns([1, 1, 1])
+                    c_s1, c_s2, c_s3 = st.columns([1, 2, 1])
                     with c_s2:
                         if st.button("Send Email", type="primary", key="t4_send", use_container_width=True):
                             with st.spinner("Sending..."): time.sleep(0.5)
@@ -602,5 +736,7 @@ inject_custom_css()
 
 if st.session_state.page == "login":
     page_login()
+elif st.session_state.page == "upload":
+    page_upload()
 else:
     page_dashboard()
